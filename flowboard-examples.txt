@@ -1,0 +1,297 @@
+=====================================================================
+FLOWBOARD - CONTOH WORKFLOW UNTUK DICOBA (6 contoh)
+=====================================================================
+
+CARA MEMBUAT NODE (berlaku untuk semua contoh)
+---------------------------------------------------------------------
+1. Dari Dashboard klik "New workflow".
+2. Klik tombol Trigger / Condition / Action di toolbar canvas
+   (atau tarik tombolnya ke canvas).
+3. Klik sebuah node, lalu isi form di tab "Settings".
+   Kolom "Name" hanya label tampilan.
+4. Menyambung node: tarik dari titik BAWAH satu node ke titik ATAS
+   node lain.
+   Pada node Condition ada dua titik bawah:
+       titik KIRI  = True
+       titik KANAN = False
+5. Tekan tombol "Run simulation".
+
+Catatan:
+- Kolom "Value" (Condition) dan "Sample payload" (Trigger) ditulis
+  persis seperti di contoh.
+- Hasil di bawah ("HASIL") sudah dicek langsung ke engine simulasi.
+  Kalau hasilmu beda, berarti ada yang salah ketik atau salah sambung.
+
+
+=====================================================================
+CONTOH 1 - ROUTING PESANAN (cabang True / False)
+=====================================================================
+
+Alur:
+
+  Trigger --> Condition --True---> Action: email VIP
+                        \--False--> Action: Slack #orders
+
+NODE:
+
+  [Trigger]
+    Name           : New order
+    Event          : Webhook received
+    Sample payload : {"order":{"total":150,"country":"ID"}}
+
+  [Condition]
+    Name     : Order over 100?
+    Field    : order.total
+    Operator : is greater than
+    Value    : 100
+
+  [Action]
+    Name    : Email VIP
+    Action  : Send email
+    Send to : vip@shop.com
+
+  [Action]
+    Name    : Post to Slack
+    Action  : Post to Slack
+    Send to : #orders
+
+SAMBUNGAN:
+  Trigger --> Condition
+  Condition (titik True)  --> Email VIP
+  Condition (titik False) --> Post to Slack
+
+HASIL:
+  - total = 150 : Passed, 320 ms. Email VIP jalan, Slack redup (skipped).
+  - Ganti payload menjadi "total":50
+                : Passed, 240 ms. Sekarang Slack yang jalan.
+
+
+=====================================================================
+CONTOH 2 - ALERT KEAMANAN LOGIN (dua Condition berantai)
+=====================================================================
+
+Alur:
+
+  Trigger --> Condition A --True--> Condition B --True---> Action: email security
+                  |                            \--False--> Action: Slack alert
+                  \--False--> (tidak disambung, alur berhenti)
+
+NODE:
+
+  [Trigger]
+    Name           : Login attempt
+    Event          : Webhook received
+    Sample payload : {"user":{"name":"Rina","failedAttempts":5,"country":"ID"}}
+
+  [Condition A]
+    Name     : Too many failures?
+    Field    : user.failedAttempts
+    Operator : is greater than
+    Value    : 3
+
+  [Condition B]
+    Name     : Foreign country?
+    Field    : user.country
+    Operator : does not equal
+    Value    : ID
+
+  [Action]
+    Name    : Email security
+    Action  : Send email
+    Send to : security@company.com
+
+  [Action]
+    Name    : Slack alert
+    Action  : Post to Slack
+    Send to : #security-alerts
+
+SAMBUNGAN:
+  Trigger --> Condition A
+  Condition A (titik True)  --> Condition B
+  Condition B (titik True)  --> Email security
+  Condition B (titik False) --> Slack alert
+
+HASIL (ubah Sample payload untuk mencoba):
+  - "failedAttempts":5, "country":"ID"
+        : Passed, 300 ms. Hanya Slack alert yang jalan.
+  - "failedAttempts":5, "country":"US"
+        : Passed, 380 ms. Hanya Email security yang jalan.
+  - "failedAttempts":1, "country":"US"
+        : Passed, 100 ms. Berhenti di Condition A,
+          tiga node lain redup.
+
+
+=====================================================================
+CONTOH 3 - MENGUJI ERROR (action gagal)
+=====================================================================
+
+Alur:
+
+  Trigger --> Action: call URL
+
+NODE:
+
+  [Trigger]
+    Name           : Webhook
+    Event          : Webhook received
+    Sample payload : biarkan bawaan
+
+  [Action]
+    Name   : Call API
+    Action : Call a URL
+    URL    : (lihat tabel di bawah)
+
+SAMBUNGAN:
+  Trigger --> Call API
+
+HASIL (ganti isi URL):
+  - api.example.com/hook
+        : FAILED, 420 ms. URL tidak valid (harus diawali
+          http:// atau https://). Node berwarna merah.
+  - https://api.example.com/hook
+        : Passed, 420 ms.
+  - https://fail.example.com
+        : FAILED, 420 ms. Target mengandung kata "fail",
+          jadi sengaja digagalkan.
+
+Run yang gagal ikut tercatat di halaman Executions (label Failed)
+dan menaikkan angka "Failed runs" di Dashboard.
+
+
+=====================================================================
+CONTOH 4 - TRIASE TIKET SUPPORT (satu cabang, dua action sekaligus)
+=====================================================================
+
+Alur:
+
+  Trigger --> Condition --True---> Action: email billing
+                        |--True---> Action: Slack #support
+                        \--False--> Action: Slack #general
+
+  (dua garis keluar dari titik True yang sama)
+
+NODE:
+
+  [Trigger]
+    Name           : Ticket submitted
+    Event          : Form submitted
+    Sample payload : {"ticket":{"subject":"Payment failed on checkout","priority":"high"}}
+
+  [Condition]
+    Name     : About payments?
+    Field    : ticket.subject
+    Operator : contains
+    Value    : Payment
+
+  [Action]
+    Name    : Email billing
+    Action  : Send email
+    Send to : billing@shop.com
+
+  [Action]
+    Name    : Notify support
+    Action  : Post to Slack
+    Send to : #support
+
+  [Action]
+    Name    : General inbox
+    Action  : Post to Slack
+    Send to : #general
+
+SAMBUNGAN:
+  Trigger --> Condition
+  Condition (titik True)  --> Email billing
+  Condition (titik True)  --> Notify support
+  Condition (titik False) --> General inbox
+
+HASIL:
+  - subject "Payment failed on checkout"
+        : Passed, 460 ms. Dua action jalan berurutan (220 + 140 ms),
+          General inbox redup.
+  - Ganti subject menjadi "How do I reset password"
+        : Passed, 240 ms. Hanya General inbox yang jalan.
+
+Catatan: kata "failed" di subject TIDAK membuat run gagal. Aturan
+"fail" hanya berlaku untuk target (kolom Send to / URL) milik Action.
+
+
+=====================================================================
+CONTOH 5 - LAPORAN MINGGUAN (operator equals dan cabang kosong)
+=====================================================================
+
+Alur:
+
+  Trigger --> Condition --True--> Action: call report API
+
+NODE:
+
+  [Trigger]
+    Name           : Scheduled
+    Event          : Runs on a schedule
+    Sample payload : {"report":{"day":"Monday","region":"ID"}}
+
+  [Condition]
+    Name     : Is Monday?
+    Field    : report.day
+    Operator : equals
+    Value    : Monday
+
+  [Action]
+    Name   : Weekly report
+    Action : Call a URL
+    URL    : https://api.example.com/weekly-report
+
+SAMBUNGAN:
+  Trigger --> Condition
+  Condition (titik True) --> Weekly report
+
+HASIL:
+  - "day":"Monday"
+        : Passed, 480 ms.
+  - Ganti menjadi "day":"Tuesday"
+        : Passed, 100 ms. Action redup karena cabang False tidak
+          punya sambungan. Ini bukan error: workflow selesai tanpa
+          melakukan apa-apa.
+
+
+=====================================================================
+CONTOH 6 - TES VALIDASI (run sengaja diblokir)
+=====================================================================
+
+Tujuan: melihat kotak oranye "Fix before running" di tab Run log.
+Run yang diblokir validasi TIDAK masuk ke riwayat Executions dan
+tidak mengubah status workflow.
+
+Cara membuat masalahnya, dan pesan yang akan muncul:
+
+  1. Workflow berisi hanya satu Action
+       --> Add a Trigger node to start the workflow.
+
+  2. Dua node Trigger sekaligus
+       --> Only one Trigger is allowed per workflow.
+
+  3. Satu Action dibiarkan tanpa garis masuk
+       --> "New action" is not connected to the Trigger.
+
+  4. Di Contoh 1, tarik garis dari "Email VIP" kembali ke Condition
+       --> The workflow contains a cycle. Remove the loop so it
+           can finish.
+
+  5. Kosongkan kolom Field pada Condition
+       --> "<nama node>": Field is required
+
+  6. Isi Sample payload Trigger dengan:  {oops
+       --> Sample payload must be valid JSON
+
+Setelah masalah diperbaiki, kotak oranye hilang dan tombol
+"Run simulation" bisa dipakai seperti biasa.
+
+
+=====================================================================
+URUTAN DEMO YANG DISARANKAN
+=====================================================================
+  1. Contoh 1 dengan total 150, lalu ubah ke 50 (dua cabang).
+  2. Contoh 2 (Condition berantai, paling meyakinkan untuk dilihat).
+  3. Contoh 3 (penanganan error).
+  4. Buka Executions, filter "Failed", buka detail log satu run.
+  5. Kembali ke Dashboard, tunjukkan angka statistik yang berubah.
